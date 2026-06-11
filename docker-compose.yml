@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: venty-db
+    environment:
+      POSTGRES_USER: venty
+      POSTGRES_PASSWORD: venty
+      POSTGRES_DB: venty
+    ports:
+      - "5432:5432"
+    volumes:
+      - venty-pgdata:/var/lib/postgresql/data
+      # legt zusätzlich die Test-Datenbank `venty_test` (inkl. PostGIS) an
+      - ./docker/init-test-db.sh:/docker-entrypoint-initdb.d/10-init-test-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U venty -d venty"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    container_name: venty-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://venty:venty@db:5432/venty?schema=public
+      JWT_SECRET: ${JWT_SECRET:-only-for-local-docker-compose-use}
+      PORT: 3000
+      HOST: 0.0.0.0
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    command: sh -c "npx prisma migrate deploy && node dist/server.js"
+
+volumes:
+  venty-pgdata:

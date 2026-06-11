@@ -1,0 +1,138 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  username     String    @unique
+  passwordHash String
+  displayName  String
+  bio          String?
+  avatarUrl    String?
+  isActive     Boolean   @default(true)
+  isVerified   Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  refreshTokens RefreshToken[]
+  veranstalter  Veranstalter? // 1:1 – ein User kann EIN Veranstalter-Profil haben
+  teilnahmen    Teilnahme[]
+  favoriten     Favorit[]
+  friendsA      Friendship[]   @relation("FriendA")
+  friendsB      Friendship[]   @relation("FriendB")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  tokenHash String    @unique // nur der SHA-256-Hash, nie das Token selbst
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime? // Logout/Rotation = revoken
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Veranstalter {
+  id           String   @id @default(uuid()) @db.Uuid
+  ownerId      String   @unique @db.Uuid
+  owner        User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name         String
+  beschreibung String?
+  logoUrl      String?
+  bannerUrl    String?
+  kontaktEmail String?
+  websiteUrl   String?
+  adresse      String?
+  stadt        String?
+  postleitzahl String?
+  land         String?
+  latitude     Float?
+  longitude    Float?
+  isActive     Boolean  @default(true)
+  isVerified   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  events Event[]
+}
+
+model Event {
+  id             String       @id @default(uuid()) @db.Uuid
+  veranstalterId String       @db.Uuid
+  veranstalter   Veranstalter @relation(fields: [veranstalterId], references: [id], onDelete: Cascade)
+  titel          String
+  beschreibung   String?
+  ortName        String?
+  adresse        String?
+  latitude       Float
+  longitude      Float
+  // Zusätzlich existiert eine Spalte `location geography(Point, 4326)` als
+  // GENERATED COLUMN (siehe Migration `add_postgis_location`) mit GiST-Index –
+  // Quelle für die ST_DWithin-Umkreissuche. Prisma kennt sie bewusst nicht.
+  startetAm      DateTime
+  endetAm        DateTime
+  maxTeilnehmer  Int?
+  status         EventStatus  @default(DRAFT)
+  publishedAt    DateTime?
+  cancelledAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  teilnahmen Teilnahme[]
+  favoriten  Favorit[]
+
+  @@index([status, startetAm]) // Listen-Queries: published & upcoming
+  @@index([veranstalterId])
+}
+
+model Teilnahme {
+  userId    String   @db.Uuid
+  eventId   String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, eventId])
+  @@index([eventId])
+}
+
+model Favorit {
+  userId    String   @db.Uuid
+  eventId   String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, eventId])
+  @@index([eventId])
+}
+
+model Friendship {
+  // Kanonische Ordnung: userAId < userBId (im Service erzwungen)
+  // → genau eine Zeile pro Freundschaft
+  userAId   String   @db.Uuid
+  userBId   String   @db.Uuid
+  userA     User     @relation("FriendA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User     @relation("FriendB", fields: [userBId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userAId, userBId])
+  @@index([userBId])
+}
